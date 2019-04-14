@@ -88,17 +88,23 @@ pub struct Table<T> where Option<T>: FixedSizeEncoding {
     _marker: PhantomData<T>,
 }
 
-impl<T> Table<T> where Option<T>: FixedSizeEncoding {
-    pub fn new(len: usize) -> Self {
+impl<T> Default for Table<T> where Option<T>: FixedSizeEncoding {
+    fn default() -> Self {
         Table {
-            // FIXME(eddyb) only allocate and encode as many entries as needed.
-            bytes: vec![0; len * <Option<T>>::BYTE_LEN],
+            bytes: vec![],
             _marker: PhantomData,
         }
     }
+}
 
+impl<T> Table<T> where Option<T>: FixedSizeEncoding {
     pub fn set(&mut self, i: usize, value: T) {
-        Some(value).write_to_bytes(&mut self.bytes[i * <Option<T>>::BYTE_LEN..]);
+        let start = i * <Option<T>>::BYTE_LEN;
+        let end = start + <Option<T>>::BYTE_LEN;
+        if self.bytes.len() < end {
+            self.bytes.resize(end, 0);
+        }
+        Some(value).write_to_bytes(&mut self.bytes[start..end]);
     }
 
     pub fn encode(&self, buf: &mut Encoder) -> Lazy<Self> {
@@ -130,7 +136,9 @@ impl<T> Lazy<Table<T>> where Option<T>: FixedSizeEncoding {
         debug!("Table::lookup: index={:?} len={:?}", i, self.meta);
 
         let bytes = &metadata.raw_bytes()[self.position.get()..][..self.meta];
-        <Option<T>>::from_bytes(&bytes[i * <Option<T>>::BYTE_LEN..])
+        let start = i * <Option<T>>::BYTE_LEN;
+        let end = start + <Option<T>>::BYTE_LEN;
+        <Option<T>>::from_bytes(bytes.get(start..end)?)
     }
 }
 
@@ -141,14 +149,16 @@ pub struct PerDefTable<T> where Option<T>: FixedSizeEncoding {
     hi: Table<T>,
 }
 
-impl<T> PerDefTable<T> where Option<T>: FixedSizeEncoding {
-    pub fn new((max_index_lo, max_index_hi): (usize, usize)) -> Self {
+impl<T> Default for PerDefTable<T> where Option<T>: FixedSizeEncoding {
+    fn default() -> Self {
         PerDefTable {
-            lo: Table::new(max_index_lo),
-            hi: Table::new(max_index_hi),
+            lo: Table::default(),
+            hi: Table::default(),
         }
     }
+}
 
+impl<T> PerDefTable<T> where Option<T>: FixedSizeEncoding {
     pub fn set(&mut self, def_id: DefId, value: T) {
         assert!(def_id.is_local());
         let space_index = def_id.index.address_space().index();
